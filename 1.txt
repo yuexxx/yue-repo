@@ -1,0 +1,174 @@
+功能描述：
+能够在前台页面看到日志的详细信息和系统的运行情况。通过数据库查询显示的方式需要主动刷新页面，不符合要求。使用DWR通过AJAX异步调用，可以模拟类似控制台的输出功能实现日志主动输出到JSP页面。
+
+DWR简单介绍：
+DWR是java开源软件，它可以帮助开发人员完成应用AJAX技术的web程序，方便的使用AJAX技术。DWR主要由两部门组成：
+1）、一个运行在服务器端的Java Servlet，它处理请求并且向浏览器发回响应；
+2）、运行在浏览器端的JavaScript，它发送请求而且还能动态更新网页
+DWR采用新颖的方法实现了AJAX(本来也没有确切的定义)，在java代码基础上动态的生成javascript代码。web开发者可以直接调用这些javascript代码，然而真正的代码是运行在web服务器上的java code。出与安全考虑，开发者必须配置哪些java class暴露给DWR.(dwr.xml)。这种从(java到javascript)调用机制给用户一种感觉，好象常规的RPC机制，或RMI or SOAP.但是它运行在web上，不需要任何浏览器插件。
+
+实现描述：
+1、	下载DWR的开源包，并把下载的jar文件放入web工程的WEB-INF/lib目录下
+2、	修改web工程的web.xml文件，添加dwr的映射信息。简单配置如下：
+servlet>
+  <servlet-name>dwr-invoker</servlet-name>
+  <display-name>DWR Servlet</display-name>
+  <servlet-class>uk.ltd.getahead.dwr.DWRServlet</servlet-class>
+  <init-param>
+     <param-name>debug</param-name>
+     <param-value>true</param-value>
+  </init-param>
+</servlet>
+<servlet-mapping>
+  <servlet-name>dwr-invoker</servlet-name>
+  <url-pattern>/dwr/*</url-pattern>
+</servlet-mapping>
+3、	在web工程的WEB-INF目录下新建dwr.xml文件，添加处理dwr消息的java类文件，内容如下：
+<!DOCTYPE dwr PUBLIC "-//GetAhead Limited//DTD Direct Web Remoting 2.0//EN" "http://getahead.org/dwr/dwr20.dtd">
+<dwr>
+  <allow>
+   <create creator="new" javascript="Logmanager">
+     <param name="class" value="com.huawei.logs.Logmanager"/>
+   </create>
+  </allow>
+</dwr>
+4、	创建指定与dwr交互的java类文件“com.huawei.logs.Logmanager”，该类实现日志的处理显示方法，内容如下：
+package com.huawei.logs;
+
+import java.util.Collection;
+import java.util.Iterator;
+
+import org.directwebremoting.ScriptBuffer;
+import org.directwebremoting.ScriptSession;
+import org.directwebremoting.WebContext;
+import org.directwebremoting.WebContextFactory;
+
+public class Logmanager
+{
+    private static String msg = "this is begin!";
+    private static boolean isStart = false;
+    private static WebContext wctx  = null;
+    /**
+     * 发送消息
+     * @param sender 发送者
+     * @param msg 消息内容
+     */
+    public void sendlog()
+    {
+        if(wctx == null)
+        {
+            wctx = WebContextFactory.get();
+        }
+        
+        String currentPage = wctx.getCurrentPage();
+        ScriptBuffer script = new ScriptBuffer();
+        script.appendScript("showMsg(").appendData(msg).appendScript(");");
+        Collection pages = wctx.getScriptSessionsByPage(currentPage);
+        for (Iterator it = pages.iterator(); it.hasNext();)
+        {
+            ScriptSession otherSession = (ScriptSession)it.next();
+            otherSession.addScript(script);
+        }
+        if (!isStart)
+        {
+            new TestThread().start();
+        }
+    }
+    
+    public void writeLog(String content)
+    {
+        msg = content;
+        sendlog();
+    }
+    
+    class TestThread extends Thread
+    {
+        private int i = 0;
+        
+        @Override
+        public void run()
+        {
+            isStart = true;
+            try
+            {
+                while (++i <= 1000)
+                {
+                    writeLog("<br>now i is :" + i);
+                    
+                    sleep(100);
+                }
+                writeLog("<br>this is end ! ");
+            }
+            catch (InterruptedException e)
+            {
+                // TODO Auto-generated catch block
+                e.printStackTrace();
+            }
+        }
+        
+    }
+}
+          为方面演示，本类实现了一个内部线程，用于演示发送在前台显示的日志。
+5、	创建显示日志的jsp页面，如demo.jsp。在页面实现javascript程序调用dwr，在页面展示展示日志：
+       <%@ page language="java" pageEncoding="GBK"%>
+<html>
+	<head>
+		<script type='text/javascript'
+			src='<%=request.getContextPath()%>/dwr/interface/Logmanager.js'></script>
+		<script type='text/javascript'
+			src='<%=request.getContextPath()%>/dwr/engine.js'></script>
+		<script type='text/javascript'
+			src='<%=request.getContextPath()%>/dwr/util.js'></script>
+		<script type="text/javascript">
+		  //初始化设置
+		  function init() 
+		  { 
+		    dwr.engine.setActiveReverseAjax(true); 
+		  }
+		  //调用发送日志请求
+		  function getLog() {
+	        Logmanager.sendlog();
+		  }
+		  //前台显示日志信息
+		  function showMsg(msg)
+		  {
+		    document.getElementById("div-info").innerHTML += msg;
+		    var box = document.getElementById('div-info');
+		    var _top = box.scrollTop + 200;
+		    box.scrollTop = _top; 
+		  }
+		</script>
+	</head>
+	<body onload="init();getLog();">
+		<div id="div-info"
+			style="width: 200px; height: 200px; border: solid 1px; overflow: auto;"></div>
+	</body>
+</html>
+6、	启动web容器，如tomcat。在浏览器中输入web访问地址，如：http://localhost:8080/demo/demo.jsp。即可以在前台显示日志信息，如图：
+           
+实现注意点介绍：
+1、	后台初始化方法执行一次，记住主动日志发送的jsp页面信息
+if(wctx == null)
+{
+   wctx = WebContextFactory.get();
+}
+
+2、	通过声明静态变量记录日志信息，以在日志方法中使用，这样在第一次页面触发事件做初始化的时候不需要传入参数
+   public void sendlog() 方法
+//前台调用发送日志请求
+function getLog() {
+	Logmanager.sendlog();
+}
+
+3、	在日志方法中调用sendlog方法主动发送日志到前台jsp页面
+public void writeLog(String content)
+ {
+     ………..
+     sendlog();
+     }
+4、	日志信息在前台累加，避免后台出现大对象。
+   document.getElementById("div-info").innerHTML += msg;
+5、	设置页面显示日志的div控件根据日志数据的多少，自动向下滚动。
+var box = document.getElementById('div-info');
+var _top = box.scrollTop + 200;//每次有日志信息出现则下滚200单位
+	  box.scrollTop = _top;
